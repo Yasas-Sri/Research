@@ -1,10 +1,8 @@
 import pytest
 import torch
 import torch.nn.functional as F
-from torch.utils._pytree import tree_leaves
-from torch.utils._python_dispatch import TorchDispatchMode
 
-from conftest import assert_causal
+from conftest import MaxNumel, assert_causal
 from hybrid.attention import SlidingWindowAttention, swa_efficient, swa_reference
 from hybrid.config import MixerConfig
 from hybrid.rope import apply_rope, rope_cos_sin
@@ -57,19 +55,6 @@ def test_swa_window_gradient_support(seed, float64, w):
         (g,) = torch.autograd.grad(out[:, t].sum(), v, retain_graph=True)  # (B, L, H, D)
         support = g.abs().sum((0, 2, 3)).nonzero().flatten().tolist()
         assert support == list(range(max(0, t - w + 1), t + 1)), f"t={t}"
-
-
-class MaxNumel(TorchDispatchMode):
-    """Records the largest tensor produced by any aten op (including einsum/softmax intermediates)."""
-
-    def __init__(self):
-        super().__init__()
-        self.max = 0
-
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        out = func(*args, **(kwargs or {}))
-        self.max = max([self.max] + [t.numel() for t in tree_leaves(out) if isinstance(t, torch.Tensor)])
-        return out
 
 
 def max_numel(fn, L, w):

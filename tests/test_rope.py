@@ -3,7 +3,10 @@ import math
 import pytest
 import torch
 
+from hybrid.attention import SlidingWindowAttention
+from hybrid.config import MixerConfig
 from hybrid.rope import UnifiedRoPE, apply_rope, rope_cos_sin
+from hybrid.ssm import SSDBranch
 
 D, BASE = 8, 10000.0
 
@@ -58,3 +61,15 @@ def test_rope_matches_explicit_rotation_matrix(seed, float64):
     x = torch.randn(2, len(positions), 3, D)
     expected = torch.einsum("lde,blhe->blhd", R, x)
     torch.testing.assert_close(apply_rope(x, cos, sin), expected, rtol=0, atol=1e-12)
+
+
+def test_unified_rope_shared_by_both_branches(seed, float64):
+    """One UnifiedRoPE call feeds both branches (A2: D_h == N); both stay shift-invariant under it."""
+    cfg = MixerConfig(d_model=32, attn_head_dim=8, ssm_d_state=8, ssm_head_dim=16, attn_window=4, ssm_chunk=8)
+    rope = UnifiedRoPE(cfg.attn_head_dim, cfg.rope_base)
+    swa, ssd = SlidingWindowAttention(cfg), SSDBranch(cfg)
+    x, positions = torch.randn(2, 21, cfg.d_model), torch.arange(21)
+    cos, sin = rope(positions)
+    cos_s, sin_s = rope(positions + 1000)
+    torch.testing.assert_close(swa(x, cos_s, sin_s), swa(x, cos, sin), rtol=0, atol=1e-10)
+    torch.testing.assert_close(ssd(x, cos_s, sin_s), ssd(x, cos, sin), rtol=0, atol=1e-9)

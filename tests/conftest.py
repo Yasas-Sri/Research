@@ -1,5 +1,7 @@
 import pytest
 import torch
+from torch.utils._pytree import tree_leaves
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 @pytest.fixture
@@ -39,3 +41,16 @@ def assert_causal(fn, inputs, t0):
     out = fn(*inputs)
     out_p = fn(*perturbed)
     assert torch.equal(out[:, :t0], out_p[:, :t0]), f"output before t0={t0} changed"
+
+
+class MaxNumel(TorchDispatchMode):
+    """Records the largest tensor produced by any aten op (including einsum/softmax intermediates)."""
+
+    def __init__(self):
+        super().__init__()
+        self.max = 0
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        out = func(*args, **(kwargs or {}))
+        self.max = max([self.max] + [t.numel() for t in tree_leaves(out) if isinstance(t, torch.Tensor)])
+        return out
